@@ -1,0 +1,329 @@
+---
+title: "The Health and Economic Effects of Different Storm Types"
+author: "Isabella Salmi"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+## Synopsis
+In this article we seek to assess which weather events are most damaging in the United States. We performed our analysis on two types of damage: human population damage, comprising of fatalities and injuries, and economic damage, comprising of the estimated cost of damage to crops and property. To carry out our analysis we utilized NOAA's storm database, which has tracked weather events and their consequences since 1970.  
+
+We conclude that tornadoes and tsunamis cause the most casualties, while tornadoes, floods, and hurricanes cause the most costly damage. 
+
+
+## Data Preparation
+
+In order to carry out analysis, we first need to prepare the data. The data used in this report is from NOAA's storm database and can be found at:
+```https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2```
+
+First we read in the data file and look at its structure. 
+```{r, cache = TRUE}
+file <- "data/repdata_data_StormData.csv.bz2"
+rawData <- read.csv(file, header = TRUE)
+str(rawData)
+```
+
+The data contains 37 variables, most of which we will not need for the present research. We will filter out only the variables required, and rename them in the process. Rather than listing the full numeric value of damages, the dataset gives values to three significant figures, with a second variable storing the magnitude of of the value. We include code to merge the two damage variables into one variable representing their full monetary value, e.g. `2.5` and `K` should become `2500`.
+
+```{r, cache = TRUE}
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+# create a dataframe with only the variables we need
+eventDataFull <- select(rawData, event = EVTYPE, fatalities = FATALITIES, injuries = INJURIES,  pDmg = PROPDMG, pMag = PROPDMGEXP, cDmg = CROPDMG, cMag = CROPDMGEXP)
+
+# string variables to lowercase for easier parsing
+eventDataFull$pMag <- tolower(as.character(eventDataFull$pMag))
+eventDataFull$cMag <- tolower(as.character(eventDataFull$cMag))
+
+# helper function to translate magnitude keys
+magnitude <- function(x){
+    if (x == "h") {
+        return(100)
+    } else if (x == "k") {
+        return(1000)
+    } else if (x == "m") {
+        return(1000000)
+    } else {
+        return(1)
+    }
+}
+
+# convert magnitude variables to numeric equivalents
+eventDataFull$pMag <- sapply(eventDataFull$pMag, magnitude)
+eventDataFull$cMag <- sapply(eventDataFull$cMag, magnitude)
+
+# use magnitude to calculate total costs
+eventDataFull <- eventDataFull %>%
+    mutate(pDmg = pMag * pDmg, cDmg = cMag * cDmg) %>%
+    mutate(totDmg = pDmg + cDmg) %>%
+    select(event, fatalities, injuries, pDmg, cDmg, totDmg)
+
+# here is what it looks like now
+kable(eventDataFull[1060:1100,]) %>% kable_styling(full_width = F)
+```
+
+Each row represents one recorded weather event. The variables are defined as follows:  
+*`event`: weather event type
+*`fatalities`: estimated fatalities caused by event, directly or indirectly
+*`injuries`: estimated injuries caused by event, directly or indirectly
+*`pDmg`: property damage caused by event, US dollars
+*`cDmg`: crop damage caused by event, US dollars
+*`totDmg` : total damage caused by event, US dollars
+
+Now we have problem with our event types. According to the NOAA guide for this dataset, there are 48 different weather event types. However when we look at our `event` column:
+```{r} 
+str(eventDataFull$event)
+```
+We see that there are 985 levels. Due to data entry inconsistencies, many events that should be considered the same type were entered with different labels. Now we will have to attempt to consolidate the event types to get close to the target of 48. 
+
+```{r, cache = TRUE}
+library(stringr)
+eventData <- eventDataFull
+eventData$event <- tolower(as.character(eventData$event))
+
+# this will take some time to run
+# order of steps is very important
+eventData$event <- str_replace_all(eventData$event, "tides", "tide")
+eventData$event <- str_replace_all(eventData$event, ".*high tide.*", "astronomical high tide")
+eventData$event <- str_replace_all(eventData$event, ".*blow-out.*", "astronomical high tide")
+eventData$event <- str_replace_all(eventData$event, ".*ava.*", "avalanche")
+eventData$event <- str_replace_all(eventData$event, ".*blizzard.*", "blizzard")
+eventData$event <- str_replace_all(eventData$event, ".*(flo+d|floyd).*", "flood")
+eventData$event <- str_replace_all(eventData$event, ".*(f|v)og.*", "fog")
+eventData$event <- str_replace_all(eventData$event, ".*smoke.*", "dense smoke")
+eventData$event <- str_replace_all(eventData$event, ".*drought.*", "drought")
+eventData$event <- str_replace_all(eventData$event, ".*dust dev.*", "dust devil")
+eventData$event <- str_replace_all(eventData$event, ".*(duststorm|dust)$", "dust storm")
+eventData$event <- str_replace_all(eventData$event, ".*funnel.*", "funnel cloud")
+eventData$event <- str_replace_all(eventData$event, ".*hail.*", "hail")
+eventData$event <- str_replace_all(eventData$event, ".*surf.*", "high surf")
+eventData$event <- str_replace_all(eventData$event, ".*hurricane.*", "hurricane")
+eventData$event <- str_replace_all(eventData$event, ".*typhoon.*", "hurricane")
+eventData$event <- str_replace_all(eventData$event, ".*marine.*", "marine strong wind")
+eventData$event <- str_replace_all(eventData$event, ".*rip.*", "rip current")
+eventData$event <- str_replace_all(eventData$event, ".*surge.*", "storm surge/tide")
+eventData$event <- str_replace_all(eventData$event, ".*(torn|nado).*", "tornado")
+eventData$event <- str_replace_all(eventData$event, ".*tropical storm.*", "tropical storm")
+eventData$event <- str_replace_all(eventData$event, ".*spout.*", "waterspout")
+eventData$event <- str_replace_all(eventData$event, ".*fire.*", "wildfire")
+eventData$event <- str_replace_all(eventData$event, ".*(th*un*de*r*|lig.tn*ing|tstm).*", "thunderstorm")
+eventData$event <- str_replace_all(eventData$event, ".*(hot|heat).*", "heat")
+eventData$event <- str_replace_all(eventData$event, ".*chill.*", "cold")
+eventData$event <- str_replace_all(eventData$event, ".*(snow|winter storm).*", "snow/winter storm")
+eventData$event <- str_replace_all(eventData$event, ".*ice.*storm.*", "snow/winter storm")
+eventData$event <- str_replace_all(eventData$event, ".*winter.*(weather|mix).*", "winter weather")
+eventData$event <- str_replace_all(eventData$event, ".*(sleet|freezing|ic(e|y)|wintry).*", "winter weather")
+eventData$event <- str_replace_all(eventData$event, ".*(rain|precip|shower).*", "rain")
+eventData$event <- str_replace_all(eventData$event, ".*(cold|cool|hyp|low temp|freeze|frost|glaze).*", "cold")
+eventData$event <- str_replace_all(eventData$event, ".*wi*nd.*", "strong wind")
+eventData$event <- str_replace_all(eventData$event, ".*warm.*", "heat")
+eventData$event <- str_replace_all(eventData$event, ".*dr(i|y).*", "drought")
+eventData$event <- str_replace_all(eventData$event, ".*(burst|wet).*", "rain")
+eventData$event <- str_replace_all(eventData$event, ".*wall cloud.*", "wall cloud")
+eventData$event <- str_replace_all(eventData$event, ".*(stream|urban).*", "flood")
+eventData$event <- str_replace_all(eventData$event, ".*(erosi|slide|slump).*", "erosion/landslide")
+eventData$event <- str_replace_all(eventData$event, ".*((swell|wave).*|seas$)", "high surf")
+eventData$event <- str_replace_all(eventData$event, ".*record.*", "record temperature")
+eventData$event <- str_replace_all(eventData$event, ".*(dam.*|drown.*|water$)", "flood")
+eventData$event <- str_replace_all(eventData$event, ".*vol.*", "volcanic eruption/ash")
+eventData$event <- str_replace_all(eventData$event, ".*summary.*", "summary")
+eventData$event <- str_replace_all(eventData$event, ".*mix.*", "winter weather")
+eventData$event <- str_replace_all(eventData$event, ".*coastal.*", "coastal storm")
+
+#remove summaries, which are not single weather events
+eventData <- eventData %>%
+    filter(!grepl("summary", event)) %>%
+    group_by(event)
+
+# here are the categories we have now 
+kable(table(eventData$event))
+
+```
+
+
+After this process we have 49 event categories. 34 of these are major categories, while the other 13 are unspecific or unrelated to weather, and only have a few cases each. Because these categories will not be informative for our analysis, we will remove them.
+
+```{r}
+eventData <- eventData %>% filter(event %in% c("astronomical high tide", 
+                                            "astronomical low tide",
+                                            "avalanche", "blizzard", 
+                                            "coastal storm", "cold",
+                                            "dense smoke", "drought",
+                                            "dust devil", "dust storm",
+                                            "erosion/landslide", "flood",
+                                            "fog", "funnel cloud", "hail",
+                                            "heat", "high surf", "hurricane",
+                                            "rain", "rip current", "seiche",
+                                            "snow/winter storm", 
+                                            "storm surge/tide", "strong wind",
+                                            "thunderstorm", "tornado", 
+                                            "tropical depression", 
+                                            "tropical storm", "tsunami",
+                                            "volcanic eruption/ash",
+                                            "wall cloud", "waterspout",
+                                            "wildfire","winter weather")) %>%
+    group_by(event)
+```
+
+
+## Analysis and Results
+### Population Consequences
+In order to answer the question of which types of weather events are most harmful to population health, we will look at the recorded deaths and injuries caused by each type. We will find the average deaths and injuries caused by each occurence of the event as well as the total recorded deaths and injuries caused by all recorded occurences of that type. 
+
+```{r}
+# calculate aggregate variables for each event type
+popData <- summarise(eventData, avgFat = mean(fatalities), 
+                     avgInj = mean(injuries), totFat = sum(fatalities), 
+                     totInj = sum(injuries))
+
+kable(popData) %>% kable_styling(full_width = F)
+```
+
+Immediately we see that certain weather events--astronomical high and low tide, dense smoke, seiche, tropical depression, volcanic eruption, and wall cloud--have never caused human injury or death that were recorded in NOAA's database. We will remove these cases in order to build more interesting plots.
+
+```{r}
+popData %>% filter((avgFat+avgInj+totFat+totInj) > 0)
+```
+
+Now we will look at the total deaths and injuries from each event type. 
+
+```{r}
+library(ggplot2)
+# total deaths from each type of event
+kable(arrange(select(popData, event, totFat), desc(totFat))) %>% kable_styling(full_width = F)
+
+# total injuries from each type of event
+kable(arrange(select(popData, event, totInj), desc(totInj))) %>% kable_styling(full_width = F)
+
+# lets narrow it down to the top 10
+popDataShort <- popData %>%
+    mutate(gross = totFat + totInj) %>%
+    arrange(desc(gross)) %>%
+    slice(1:10)
+
+# make a skinny data set    
+totPopData <- popDataShort %>%
+    select(event, totFat, totInj) %>%
+    gather("type", "total", 2:3)
+
+ggplot(totPopData, aes(x = event, y = total, fill = type)) +
+    geom_bar(position = "dodge", stat = "identity") +
+    labs(x = "Weather Event Type", y = "Total Recorded Casualties Since 1950") + 
+    scale_fill_discrete(name = "", labels = c("Fatalities", "Injuries"))+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) 
+
+```
+
+
+We see that tornadoes by far have the most injuries, trailed by thunderstorms, heat, and floods. Because the tornado injusry bar is so high, it is difficult to compare the fatalities bars, so we'll take a look at fatalities on their own:
+```{r}
+ggplot(filter(totPopData, type == "totFat"), aes(x = event, y = total)) +
+    geom_bar(stat = "identity", fill = "seagreen3") +
+    labs(x = "Weather Event Type", y = "Total Recorded Deaths Since 1950") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) 
+```
+
+
+We see that tornadoes indeed have the most fatalities, followed by heat, floods, and thunderstorms. 
+
+However, looking at the total casualties since 1950 only shows us a part of the picture. Perhaps some of these weather events occur very frequently, but each of them causes relatively few casualties. Or there is one catastrophic event, such as Hurricane Katrina, that caused far more casualties than others of their type. Or some events were not tracked by NOAA until later. For this reason we should look at the average casualties caused by each occurence of an event, to see which ones pose the most risk.
+
+```{r}
+# average deaths from each type of event
+kable(arrange(select(popData, event, avgFat), desc(avgFat))) %>% kable_styling(full_width = F)
+
+# average injuries from each type of event
+kable(arrange(select(popData, event, avgInj), desc(avgInj))) %>% kable_styling(full_width = F)
+
+# only include the 10 highest combined averages
+popDataShort <- popData %>%
+     mutate(combined = avgFat + avgInj) %>%
+     arrange(desc(combined)) %>%
+     slice(1:10)
+
+# make a skinny data set    
+avgPopData <- popDataShort %>%
+    select(event, avgFat, avgInj) %>%
+    gather("type", "total", 2:3)
+
+ggplot(avgPopData, aes(x = event, y = total, fill = type)) +
+    geom_bar(position = "dodge", stat = "identity") +
+    labs(x = "Weather Event Type", y = "Average Recorded Casualties per Event") + 
+    scale_fill_discrete(name = "", labels = c("Fatalities", "Injuries"))+
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+      
+```
+
+
+Here we see that tsunamis average the most fatalities and injuries. Heat, rip currents, avalanches, and hurricanes follow for fatalities, and hurricanes, heat, and tornadoes folloe for injuries. 
+
+### Population Conclusion
+Based on the above analysis, tornadoes have been the most harmful weather events to human health over the last 70 years. However, tsunamis are less common, but each occurence poses a massive risk to human life and safety in the US. The other most damaging events are heat, hurricanes, and thunderstroms. 
+
+
+### Economic Consequences
+In order to answer the question of which types of weather events have the most economic consequences, we will look at the recorded property and crop damage estimated for each type. Similar to the previous section, we will look at both the average damage by one occurence and the total damage caused by all recorded occurences.
+
+
+```{r}
+# calculate aggregate variables for each event type
+econData <- summarise(eventData, totCost = sum(totDmg), avgCost = mean(totDmg))
+
+kable(econData) %>% kable_styling(full_width = F)
+```
+
+
+Nearly all weather events have some associated cost (only wall clouds have none), so we will keep all data points for now. 
+
+Now we will look at the total damages for each event type.  
+
+```{r}
+library(ggplot2)
+# total damages from each type of event
+kable(arrange(select(econData, event, totCost), desc(totCost))) %>% kable_styling(full_width = F)
+
+# lets narrow it down to the top 15
+totEconData <- econData %>%
+    arrange(desc(totCost)) %>%
+    slice(1:15) %>%
+    select(event, totCost)
+
+ggplot(totEconData, aes(x = event, y = totCost)) +
+    geom_bar(stat = "identity", fill = "magenta3") +
+    labs(x = "Weather Event Type", y = "Total Damages since 1950 (dollars)") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) 
+
+```
+
+
+We see that floods and tornadoes have been by far the most costly since 1950, trailed by hail, droughts, hurricanes, and thunderstorms. 
+
+However, for the same reasons stated in the previous section, we will also look at the average damages caused by each occurence of a weather event type. 
+
+```{r}
+# average damages from each type of event
+kable(arrange(select(econData, event, avgCost), desc(avgCost))) %>% kable_styling(full_width = F)
+
+# lets narrow it down to the top 15
+avgEconData <- econData %>%
+    arrange(desc(avgCost)) %>%
+    slice(1:15) %>%
+    select(event, avgCost)
+
+ggplot(avgEconData, aes(x = event, y = avgCost)) +
+    geom_bar(stat = "identity", fill = "darkorange2") +
+    labs(x = "Weather Event Type", y = "Average Damages per Occurence (dollars)") + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) 
+ 
+```
+
+
+We see that each individual hurricane has the most potential for economic damage. Trailing far behind are tsunamis, droughts, and tropical storms. 
+
+### Population Conclusion
+Based on the above analysis, tornadoes and floods have been the most economically damaging weather events over the last 70 years. However, hurricanes are less common, but each occurence has the most potential for damage to crops and property. The other most damaging events are tsunamis, droughts, tropical storms, and hail. 
+
